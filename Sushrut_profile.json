@@ -1,0 +1,14 @@
+{
+    "name": "Sushrut",
+    "age": 26,
+    "gender": "male",
+    "height_cm": 186.0,
+    "weight_kg": 80.0,
+    "bmi": 23.12,
+    "blood_sugar_mg_dl": null,
+    "blood_pressure": null,
+    "dietary_preference": "Vegetarian",
+    "allergies": [],
+    "dietary_goal": "Weight Loss",
+    "calorie_target": null
+}

@@ -1,4 +1,9 @@
 import json
+import requests
+import google.generativeai as genai
+import os
+
+
 
 def calculate_bmi(weight, height):
     """Calculate BMI given weight (kg) and height (cm)."""
@@ -91,7 +96,40 @@ def collect_user_profile():
     print("\n✅ Profile successfully created and saved as '<user_name>_profile.json'")
     return user_profile
 
+def generate_diet_plan(user_profile):
+    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "/Users/sushrut/Downloads/first-cascade-472801-c0-076a61da6cdd.json"
+    model = genai.GenerativeModel("gemini-1.5-flash")
+    # Prepare prompt
+    prompt = f"""
+Generate a personalized weekly diet plan based on the following profile:
+
+Name: {user_profile['name']}
+Age: {user_profile['age']}
+Gender: {user_profile['gender']}
+Height: {user_profile['height_cm']} cm
+Weight: {user_profile['weight_kg']} kg
+BMI: {user_profile['bmi']}
+Dietary Preference: {user_profile['dietary_preference']}
+Allergies: {', '.join(user_profile['allergies']) if user_profile['allergies'] else 'None'}
+Health Goal: {user_profile['dietary_goal']}
+Calorie Target: {user_profile['calorie_target'] if user_profile['calorie_target'] else 'Auto-calculated'}
+
+Provide a balanced diet plan with meals for each day, including breakfast, lunch, dinner, and snacks.
+"""
+
+    response = model.generate_content(
+        prompt
+    )
+
+    return response.text
+
+
 if __name__ == "__main__":
     profile = collect_user_profile()
     print("\n=== Your Profile ===")
     print(json.dumps(profile, indent=4))
+
+    print("\nGenerating your weekly diet plan...\n")
+    plan = generate_diet_plan(profile)
+    print("\n=== Weekly Diet Plan ===\n")
+    print(plan)
