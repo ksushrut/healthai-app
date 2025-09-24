@@ -1,63 +1,65 @@
 import streamlit as st
-from _1_Login_Signup import show_login_signup
+from _1_Login_Signup2 import show_login_signup
 from _2_Profile import show_profile
 from _3_Dashboard import show_dashboard
 from supabase_config import supabase
 
+st.set_page_config(page_title="HealthAI", page_icon="🩺", layout="wide")
 
-# --- Initialize session state ---
-if "logged_in" not in st.session_state:
-    st.session_state.logged_in = False
-if "profile_filled" not in st.session_state:
-    st.session_state.profile_filled = False
-if "current_page" not in st.session_state:
-    st.session_state.current_page = "_1_Login_Signup"
-if "user_id" not in st.session_state:
-    st.session_state.user_id = None
-if "user_email" not in st.session_state:
-    st.session_state.user_email = None
+# --- Init session state ---
+st.session_state.setdefault("logged_in", False)
+st.session_state.setdefault("profile_filled", False)
+st.session_state.setdefault("current_page", "_1_Login_Signup2")
+st.session_state.setdefault("user_id", None)
+st.session_state.setdefault("user_email", None)
+st.session_state.setdefault("oauth_intent", None)  # "Login" or "Signup"
 
+def go(page_name: str) -> None:
+    st.session_state["current_page"] = page_name
+    st.rerun()
 
-# --- Check Supabase session (Google or Email) ---
+# --- If a valid Supabase session exists and we aren't marked logged in yet, hydrate state & route ---
 session = supabase.auth.get_session()
-if session and not st.session_state.logged_in:
+if session and not st.session_state["logged_in"]:
     user = session.user
 
-    # Record / update user in Users table
-    supabase.table("Users").upsert({
-        "UserID": user.id,
-        "email": user.email,
-        "first_name": (user.user_metadata.get("full_name", "").split(" ")[0]
-                       if user.user_metadata and user.user_metadata.get("full_name") else None),
-        "last_name": (user.user_metadata.get("full_name", "").split(" ")[-1]
-                      if user.user_metadata and user.user_metadata.get("full_name") else None),
-        "auth_provider": "google" if user.app_metadata.get("provider") == "google" else "email"
-    }).execute()
+    # Upsert Users (safe for both email & Google)
+    try:
+        full_name = (user.user_metadata or {}).get("full_name", "") or ""
+        parts = full_name.split()
+        first_name = parts[0] if parts else None
+        last_name = parts[-1] if len(parts) > 1 else None
+        provider = (user.app_metadata or {}).get("provider", "email")
+        supabase.table("Users").upsert({
+            "UserID": user.id,
+            "email": user.email,
+            "first_name": first_name,
+            "last_name": last_name,
+            "auth_provider": provider
+        }).execute()
+    except Exception:
+        pass
 
-    # Save session state
-    st.session_state.logged_in = True
-    st.session_state.user_id = user.id
-    st.session_state.user_email = user.email
+    st.session_state["logged_in"] = True
+    st.session_state["user_id"] = user.id
+    st.session_state["user_email"] = user.email
 
-    # Decide navigation
-    if st.session_state.get("oauth_intent") == "Signup":
-        st.session_state.current_page = "_2_Profile"
+    has_profile = bool(
+        supabase.table("User_Profiles").select("*").eq("UserID", user.id).execute().data
+    )
+
+    if st.session_state.get("oauth_intent") == "Signup" and not has_profile:
+        st.session_state["profile_filled"] = False
+        go("_2_Profile")
     else:
-        profile_check = supabase.table("User_Profiles").select("*").eq("UserID", user.id).execute()
-        if profile_check.data:
-            st.session_state.profile_filled = True
-            st.session_state.current_page = "_3_Dashboard"
-        else:
-            st.session_state.profile_filled = False
-            st.session_state.current_page = "_2_Profile"
-
+        st.session_state["profile_filled"] = has_profile
+        go("_3_Dashboard" if has_profile else "_2_Profile")
 
 # --- Router ---
-if st.session_state.current_page == "_1_Login_Signup":
-    show_login_signup()
+ROUTES = {
+    "_1_Login_Signup2": show_login_signup,
+    "_2_Profile": show_profile,
+    "_3_Dashboard": show_dashboard,
+}
 
-elif st.session_state.current_page == "_2_Profile":
-    show_profile()
-
-elif st.session_state.current_page == "_3_Dashboard":
-    show_dashboard()
+ROUTES.get(st.session_state["current_page"], show_login_signup)()
