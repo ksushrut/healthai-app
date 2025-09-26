@@ -1,65 +1,90 @@
+# streamlit_app.py
+import os
 import streamlit as st
-from _1_Login_Signup2 import show_login_signup
-from _2_Profile import show_profile
-from _3_Dashboard import show_dashboard
-from supabase_config import supabase
 
-st.set_page_config(page_title="HealthAI", page_icon="🩺", layout="wide")
+st.set_page_config(page_title="HealthAI", page_icon="💪", layout="wide")
 
-# --- Init session state ---
-st.session_state.setdefault("logged_in", False)
-st.session_state.setdefault("profile_filled", False)
-st.session_state.setdefault("current_page", "_1_Login_Signup2")
-st.session_state.setdefault("user_id", None)
-st.session_state.setdefault("user_email", None)
-st.session_state.setdefault("oauth_intent", None)  # "Login" or "Signup"
-
-def go(page_name: str) -> None:
-    st.session_state["current_page"] = page_name
-    st.rerun()
-
-# --- If a valid Supabase session exists and we aren't marked logged in yet, hydrate state & route ---
-session = supabase.auth.get_session()
-if session and not st.session_state["logged_in"]:
-    user = session.user
-
-    # Upsert Users (safe for both email & Google)
+# Make GOOGLE_API_KEY available from secrets if present (non-fatal if missing)
+if not os.getenv("GOOGLE_API_KEY"):
     try:
-        full_name = (user.user_metadata or {}).get("full_name", "") or ""
-        parts = full_name.split()
-        first_name = parts[0] if parts else None
-        last_name = parts[-1] if len(parts) > 1 else None
-        provider = (user.app_metadata or {}).get("provider", "email")
-        supabase.table("Users").upsert({
-            "UserID": user.id,
-            "email": user.email,
-            "first_name": first_name,
-            "last_name": last_name,
-            "auth_provider": provider
-        }).execute()
+        k = st.secrets.get("GOOGLE_API_KEY", None)
+        if k:
+            os.environ["GOOGLE_API_KEY"] = k
     except Exception:
         pass
 
-    st.session_state["logged_in"] = True
-    st.session_state["user_id"] = user.id
-    st.session_state["user_email"] = user.email
+# ---- Import pages ----
+# Login: keep your file/code unchanged; we just call show_login_signup()
+from _1_Login_Signup2 import show_login_signup
 
-    has_profile = bool(
-        supabase.table("User_Profiles").select("*").eq("UserID", user.id).execute().data
-    )
+# Profile and Dashboard renderers
+try:
+    from _2_Profile import render_profile
+except Exception as e:
+    def render_profile():
+        st.error(f"Could not import render_profile from _2_Profile.py: {e}")
 
-    if st.session_state.get("oauth_intent") == "Signup" and not has_profile:
-        st.session_state["profile_filled"] = False
-        go("_2_Profile")
-    else:
-        st.session_state["profile_filled"] = has_profile
-        go("_3_Dashboard" if has_profile else "_2_Profile")
+try:
+    from _3_Dashboard import render_dashboard
+except Exception as e:
+    def render_dashboard():
+        st.error(f"Could not import render_dashboard from _3_Dashboard.py: {e}")
 
-# --- Router ---
-ROUTES = {
-    "_1_Login_Signup2": show_login_signup,
-    "_2_Profile": show_profile,
-    "_3_Dashboard": show_dashboard,
-}
 
-ROUTES.get(st.session_state["current_page"], show_login_signup)()
+def _resolve_route() -> str:
+    """
+    Decide which page to show (no sidebar).
+    - If not logged in -> login
+    - If logged in and profile not filled -> profile
+    - Else -> dashboard
+    """
+    if not st.session_state.get("logged_in"):
+        return "_1_Login_Signup2"
+
+    # Prefer whatever your login handler set. Otherwise infer.
+    current = st.session_state.get("current_page")
+    if current:
+        return current
+
+    if st.session_state.get("profile_filled"):
+        return "_3_Dashboard"
+    return "_2_Profile"
+
+
+def main():
+    route = _resolve_route()
+
+    if route == "_1_Login_Signup2":
+        # Your own login page sets:
+        #   st.session_state["logged_in"] = True
+        #   st.session_state["user_id"]   = <uuid>
+        #   st.session_state["user_email"] = <email>
+        #   st.session_state["current_page"] = "_2_Profile" or "_3_Dashboard"
+        #   (in handle_authenticated_user())
+        show_login_signup()
+        return
+
+    if route == "_2_Profile":
+        # Guard: if someone hits this URL directly without login, bounce to login
+        if not st.session_state.get("logged_in"):
+            st.session_state["current_page"] = "_1_Login_Signup2"
+            st.rerun()
+        render_profile()
+        return
+
+    if route == "_3_Dashboard":
+        # Guard: must be logged in
+        if not st.session_state.get("logged_in"):
+            st.session_state["current_page"] = "_1_Login_Signup2"
+            st.rerun()
+        render_dashboard()
+        return
+
+    # Fallback
+    st.error("Unknown route. Redirecting to login…")
+    st.session_state["current_page"] = "_1_Login_Signup2"
+    st.rerun()
+
+
+if __name__ == "__main__":
+    main()
